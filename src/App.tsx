@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   HERO_CATALOG, MYTHIC_RECIPES, ROGUELIKE_AUGMENTS, SHOP_CATALOG,
   HeroUnitSpec, RarityType, RoguelikeAugment
@@ -29,6 +29,19 @@ interface FloatingEffect {
   life: number;
 }
 
+interface Particle {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  life: number;
+  maxLife: number;
+  shape?: 'circle' | 'spark' | 'star' | 'ring';
+}
+
 // 🎵 무의존성 WebAudio 폴리포닉 사운드 합성기
 class LuckSoundEngine {
   private ctx: AudioContext | null = null;
@@ -46,6 +59,9 @@ class LuckSoundEngine {
     try {
       this.init();
       if (!this.ctx) return;
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = type;
@@ -57,6 +73,10 @@ class LuckSoundEngine {
       osc.start();
       osc.stop(this.ctx.currentTime + duration);
     } catch {}
+  }
+
+  playClick() {
+    this.playTone(800, 0.04, 'sine', 0.08);
   }
 
   playSummon() {
@@ -79,6 +99,19 @@ class LuckSoundEngine {
   playGambleFail() {
     this.playTone(240, 0.18, 'sawtooth', 0.12);
     setTimeout(() => this.playTone(180, 0.25, 'sawtooth', 0.12), 120);
+  }
+
+  playHit() {
+    this.playTone(180, 0.05, 'square', 0.06);
+  }
+
+  playAttack() {
+    this.playTone(440, 0.06, 'sawtooth', 0.05);
+  }
+
+  playBossSpawn() {
+    this.playTone(130, 0.3, 'sawtooth', 0.22);
+    setTimeout(() => this.playTone(110, 0.4, 'sawtooth', 0.22), 150);
   }
 }
 
@@ -109,6 +142,7 @@ export default function App() {
   // 트랙 몬스터 (80마리 초과 시 위기!)
   const monstersRef = useRef<TrackMonster[]>([]);
   const effectsRef = useRef<FloatingEffect[]>([]);
+  const particlesRef = useRef<Particle[]>([]);
   const [monsterCount, setMonsterCount] = useState<number>(0);
   const [bossCount, setBossCount] = useState<number>(0);
 
@@ -129,6 +163,26 @@ export default function App() {
 
   const MAX_MONSTER_LIMIT = 80;
 
+  // 파티클 생성 헬퍼
+  const spawnParticles = (x: number, y: number, count: number, color: string, speed = 3, shape: 'circle' | 'spark' | 'star' | 'ring' = 'circle') => {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (Math.random() * 0.7 + 0.3) * speed;
+      particlesRef.current.push({
+        id: Math.random(),
+        x,
+        y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        size: Math.random() * 4 + 2,
+        color,
+        life: 0,
+        maxLife: Math.floor(Math.random() * 20 + 15),
+        shape
+      });
+    }
+  };
+
   // 토스트 알림 헬퍼
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -145,6 +199,7 @@ export default function App() {
 
   // 보상형 광고 실행기 (VVIP 보유 시 0초 즉시 수령)
   const triggerRewardedAd = (title: string, onReward: () => void) => {
+    sfx.playClick();
     if (vvipPass) {
       onReward();
       sfx.playMythicJackpot();
@@ -175,6 +230,7 @@ export default function App() {
 
   // 1. 일반 골드 소환
   const handleGoldSummon = () => {
+    sfx.playClick();
     const emptySlots = board.filter((s) => s.hero === null);
     if (emptySlots.length === 0) {
       showToast("⚠️ 전장 15칸이 가득 찼습니다! [✨3성 자동 합성]을 눌러 칸을 비우세요!");
@@ -202,12 +258,19 @@ export default function App() {
     setBoard((prev) =>
       prev.map((s) => (s.slotIdx === chosenSlot ? { ...s, hero: picked, star: 1 } : s))
     );
+
+    // Canvas 소환 파티클
+    const col = chosenSlot % 5;
+    const row = Math.floor(chosenSlot / 5);
+    spawnParticles(68 + col * 66, 58 + row * 42, 20, picked.color, 4, 'star');
+
     sfx.playSummon();
     showToast(`🎲 [${picked.rarityLabel}] ${picked.icon} ${picked.name} 소환 완료!`);
   };
 
   // 2. 💎 운빨석 도박 소환 (고급 60% / 영웅 25% / 전설 10%)
   const handleLuckGamble = (tier: RarityType, gemCost: number, winProb: number, label: string) => {
+    sfx.playClick();
     const emptySlots = board.filter((s) => s.hero === null);
     if (emptySlots.length === 0) {
       showToast("⚠️ 빈 슬롯이 없습니다! 먼저 [✨3성 자동 합성]을 수행하세요!");
@@ -228,6 +291,9 @@ export default function App() {
       setBoard((prev) =>
         prev.map((s) => (s.slotIdx === chosenSlot ? { ...s, hero: picked, star: 1 } : s))
       );
+      const col = chosenSlot % 5;
+      const row = Math.floor(chosenSlot / 5);
+      spawnParticles(68 + col * 66, 58 + row * 42, 35, '#fde047', 5, 'spark');
       sfx.playMythicJackpot();
       showToast(`🎰 [도박 대성공!!] ${picked.icon} [${picked.rarityLabel}] ${picked.name} 획득!!`);
     } else {
@@ -239,6 +305,7 @@ export default function App() {
 
   // 3. ✨ 원터치 3-머지(Merge) 진화
   const handleAutoMergeAll = () => {
+    sfx.playClick();
     // 같은 hero.id를 가진 슬롯이 3개 이상 있는지 탐색
     const counts: Record<string, number[]> = {};
     board.forEach((s) => {
@@ -275,6 +342,12 @@ export default function App() {
       })
     );
 
+    indices.forEach((idx) => {
+      const col = idx % 5;
+      const row = Math.floor(idx / 5);
+      spawnParticles(68 + col * 66, 58 + row * 42, 25, evolvedHero.color, 4, 'ring');
+    });
+
     sfx.playMerge();
     showToast(`✨ [3성 머지 진화!] ${sourceHero.name} 3명 ➔ ${evolvedHero.icon} [${evolvedHero.rarityLabel}] ${evolvedHero.name} 탄생!`);
   };
@@ -286,7 +359,8 @@ export default function App() {
   };
 
   const handleSummonMythic = (mythicId: string, reqHeroes: string[]) => {
-    if (!checkMythicCraftable(reqHeroes)) {
+    sfx.playClick();
+    if (!checkMythicCraftable(recipeReqToIds(reqHeroes))) {
       showToast("⚠️ 신화 강림에 필요한 하위 재료 영웅이 아직 부족합니다!");
       return;
     }
@@ -308,12 +382,19 @@ export default function App() {
       })
     );
 
+    const col = targetSlot % 5;
+    const row = Math.floor(targetSlot / 5);
+    spawnParticles(68 + col * 66, 58 + row * 42, 50, '#ef4444', 6, 'spark');
+
     sfx.playMythicJackpot();
     showToast(`⚡👑 [신화 강림!!] ${mythicUnit.icon} 『${mythicUnit.name}』 전장 강림 완료!!`);
   };
 
+  const recipeReqToIds = (reqHeroes: string[]) => reqHeroes;
+
   // 5. 👹 현상금 보스 즉시 호출 (언제든 클릭 시 보스 소환 -> 처치 시 보석 대량 드랍)
   const handleCallBountyBoss = () => {
+    sfx.playClick();
     const bossHp = Math.floor(850 * Math.pow(1.32, Math.min(wave, 50)));
     monstersRef.current.push({
       id: nextMonsterId.current++,
@@ -324,7 +405,7 @@ export default function App() {
       name: `현상금 마왕 Lv.${wave}`,
       slowTimer: 0
     });
-    sfx.playSummon();
+    sfx.playBossSpawn();
     showToast(`👹 [현상금 보스 출현!] 처치 시 💎운빨석 +6개 & 대량 골드 확정 드랍!`);
   };
 
@@ -363,7 +444,17 @@ export default function App() {
         const targetIdx = monstersRef.current.findIndex((m) => m.isBoss);
         const primaryIdx = targetIdx >= 0 ? targetIdx : 0;
 
-        monstersRef.current[primaryIdx].hp -= dmgPerTick;
+        const targetMon = monstersRef.current[primaryIdx];
+        targetMon.hp -= dmgPerTick;
+        sfx.playHit();
+
+        // 파티클 스파크
+        const padX = 24;
+        const padY = 22;
+        const trackW = 450 - padX * 2;
+        const trackH = 215 - padY * 2;
+        const targetPos = getTrackXY(targetMon.progress, padX, padY, trackW, trackH);
+        spawnParticles(targetPos.x, targetPos.y, 4, '#fbbf24', 2, 'spark');
 
         // 신화/영웅 광역 스플래시 피해
         const splashCount = Math.min(monstersRef.current.length, 4 + activeHeroes.length);
@@ -423,7 +514,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [wave, board, totalBoardPower, gameSpeed, vvipPass, augGoldBonus]);
 
-  // 웨이브 자동 상승 타이머 (12초마다 1웨이브 전진 & 매 5웨이브마다 보스 + 3택 로그라이크 유물)
+  // 웨이브 자동 상승 타이머 (10초마다 1웨이브 전진 & 매 5웨이브마다 보스 + 3택 로그라이크 유물)
   useEffect(() => {
     const waveTimer = setInterval(() => {
       setWave((w) => {
@@ -476,13 +567,18 @@ export default function App() {
         const hx = 68 + col * 66;
         const hy = 58 + row * 42;
 
-        // 신화 영웅 황금 회전 오라
+        // 신화 영웅 특수 화려한 오라 및 오라 파티클
         if (slot.hero.rarity === 'MYTHIC') {
           ctx.beginPath();
           ctx.arc(hx, hy, 20 + Math.sin(frame * 0.15) * 3, 0, Math.PI * 2);
-          ctx.strokeStyle = '#ef4444';
+          ctx.strokeStyle = slot.hero.id === 'm_thor' ? '#38bdf8' : slot.hero.id === 'm_apollo' ? '#f59e0b' : slot.hero.id === 'm_freya' ? '#a855f7' : '#ef4444';
           ctx.lineWidth = 2.5;
           ctx.stroke();
+
+          // 펄싱 신화 영웅 파티클
+          if (frame % 8 === 0) {
+            spawnParticles(hx, hy, 2, slot.hero.color, 1.5, 'star');
+          }
         }
 
         // 몬스터를 향한 레이저/번개 타격선
@@ -517,7 +613,40 @@ export default function App() {
         ctx.fillRect(pos.x - 12, pos.y - 16, 24 * hpRatio, 4);
       });
 
-      // 5. 플로팅 데미지 텍스트
+      // 5. Canvas 화려한 파티클 이펙트 렌더링
+      particlesRef.current.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life++;
+
+        const alpha = Math.max(0, 1 - p.life / p.maxLife);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.strokeStyle = p.color;
+
+        if (p.shape === 'spark') {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 0.8, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.shape === 'star') {
+          ctx.font = `${Math.floor(p.size * 2.5)}px sans-serif`;
+          ctx.fillText('✨', p.x, p.y);
+        } else if (p.shape === 'ring') {
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * (1 + p.life * 0.2), 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      });
+      particlesRef.current = particlesRef.current.filter((p) => p.life < p.maxLife);
+
+      // 6. 플로팅 데미지 텍스트
       effectsRef.current.forEach((ef) => {
         ctx.fillStyle = ef.color;
         ctx.font = 'bold 11px sans-serif';
@@ -578,6 +707,7 @@ export default function App() {
               👾 전장 몬스터 밀집도: {monsterCount} / {MAX_MONSTER_LIMIT} 마리 {bossCount > 0 ? `(👹보스 ${bossCount}기 출현중!)` : ''}
             </span>
             <span style={{ color: '#fbbf24', cursor: 'pointer', fontWeight: 800 }} onClick={() => {
+              sfx.playClick();
               if (gameSpeed === 1) setGameSpeed(2);
               else if (gameSpeed === 2) {
                 if (vvipPass) setGameSpeed(3);
@@ -682,6 +812,7 @@ export default function App() {
                     <div
                       key={slot.slotIdx}
                       onClick={() => {
+                        sfx.playClick();
                         if (selectedSlot === null) {
                           setSelectedSlot(slot.slotIdx);
                         } else if (selectedSlot === slot.slotIdx) {
@@ -752,7 +883,10 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('gamble')}
+                  onClick={() => {
+                    sfx.playClick();
+                    setActiveTab('gamble');
+                  }}
                   style={{
                     padding: '12px 6px', borderRadius: '10px', border: '2px solid #c084fc',
                     background: 'linear-gradient(180deg, #7e22ce, #4c1d95)', color: '#fff',
@@ -849,6 +983,7 @@ export default function App() {
                 </div>
                 <button
                   onClick={() => {
+                    sfx.playClick();
                     const cost = relicAtkLv * 250;
                     if (diamonds >= cost) {
                       setDiamonds((d) => d - cost);
@@ -891,6 +1026,7 @@ export default function App() {
                     <button
                       disabled={owned}
                       onClick={() => {
+                        sfx.playClick();
                         if (item.isVVIP) {
                           setVvipPass(true);
                           setGameSpeed(3);
@@ -935,7 +1071,10 @@ export default function App() {
           ].map((t) => (
             <button
               key={t.id}
-              onClick={() => setActiveTab(t.id as typeof activeTab)}
+              onClick={() => {
+                sfx.playClick();
+                setActiveTab(t.id as typeof activeTab);
+              }}
               style={{
                 background: activeTab === t.id ? '#1e293b' : 'transparent',
                 color: activeTab === t.id ? '#fde047' : '#94a3b8',
@@ -968,13 +1107,17 @@ export default function App() {
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '8px', marginTop: '12px' }}>
               <button
-                onClick={() => setGambleRerollModal(null)}
+                onClick={() => {
+                  sfx.playClick();
+                  setGambleRerollModal(null);
+                }}
                 style={{ padding: '10px', background: '#334155', color: '#cbd5e1', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
               >
                 포기하기
               </button>
               <button
                 onClick={() => {
+                  sfx.playClick();
                   const targetTier = gambleRerollModal.tier;
                   setGambleRerollModal(null);
                   triggerRewardedAd('도박 실패 100% 확정 소환 리롤', () => {
@@ -984,6 +1127,9 @@ export default function App() {
                       const picked = pool[Math.floor(Math.random() * pool.length)];
                       const chosenSlot = emptySlots[0].slotIdx;
                       setBoard((prev) => prev.map((s) => (s.slotIdx === chosenSlot ? { ...s, hero: picked, star: 1 } : s)));
+                      const col = chosenSlot % 5;
+                      const row = Math.floor(chosenSlot / 5);
+                      spawnParticles(68 + col * 66, 58 + row * 42, 30, picked.color, 4, 'star');
                     }
                   });
                 }}
@@ -1014,6 +1160,7 @@ export default function App() {
                 <button
                   key={aug.id}
                   onClick={() => {
+                    sfx.playClick();
                     if (aug.effectType === 'ATK_PCT') setAugAtkBonus((a) => a + aug.value);
                     if (aug.effectType === 'GOLD_ON_KILL') { setAugGoldBonus((g) => g + aug.value); setGold((c) => c + 500); }
                     if (aug.effectType === 'GEM_BONUS') setLuckGems((lg) => lg + aug.value);
@@ -1054,7 +1201,10 @@ export default function App() {
               (👑 <b>VVIP 무광 패스</b> 개통 시 이 창 없이 0초 즉시 수령!)
             </p>
             <button
-              onClick={adWatching.onReward}
+              onClick={() => {
+                sfx.playClick();
+                adWatching.onReward();
+              }}
               style={{
                 width: '100%', marginTop: '10px', padding: '10px', background: '#fde047',
                 color: '#000', fontWeight: 900, border: 'none', borderRadius: '8px', cursor: 'pointer'
