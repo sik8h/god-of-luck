@@ -1,0 +1,8 @@
+﻿{
+  "appId": "com.aigamestudio.godofluck",
+  "appName": "God of Luck",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
