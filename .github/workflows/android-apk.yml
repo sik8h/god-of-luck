@@ -21,6 +21,7 @@ jobs:
       - name: Install Dependencies & Build Web Assets
         run: |
           npm install
+          chmod +x node_modules/.bin/* || true
           npm run build
 
       - name: Set up JDK 17
