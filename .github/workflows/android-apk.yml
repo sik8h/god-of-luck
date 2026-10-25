@@ -27,7 +27,7 @@ jobs:
       - name: Build Web Assets & Sync Capacitor
         run: |
           npm install
-          npx vite build
+          npm run build
           npx cap sync android
 
       - name: Build Android Debug APK
