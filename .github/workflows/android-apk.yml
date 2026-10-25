@@ -27,6 +27,7 @@ jobs:
       - name: Build Web Assets & Sync Capacitor
         run: |
           npm install
+          chmod -R +x node_modules/.bin || true
           node ./node_modules/vite/bin/vite.js build
           npx cap sync android
 
